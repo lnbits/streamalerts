@@ -1,0 +1,9 @@
+{
+    "repos": [
+        {
+            "id": "streamalerts",
+            "organisation": "lnbits",
+            "repository": "streamalerts"
+        }
+    ]
+}
