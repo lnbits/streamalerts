@@ -5,15 +5,10 @@ from starlette.exceptions import HTTPException
 from starlette.requests import Request
 from starlette.responses import RedirectResponse
 
-from lnbits.core.crud import get_user
+from lnbits.core.crud import get_user, get_wallet
 from lnbits.decorators import WalletTypeInfo, get_key_type
-
-# todo: use the API, not direct import
-from lnbits.extensions.satspay.models import CreateCharge  # type: ignore
 from lnbits.utils.exchange_rates import btc_price
 
-# todo: use the API, not direct import
-from ..satspay.crud import create_charge, get_charge  # type: ignore
 from . import streamalerts_ext
 from .crud import (
     authenticate_service,
@@ -31,6 +26,7 @@ from .crud import (
     update_donation,
     update_service,
 )
+from .helpers import create_charge, get_charge_status
 from .models import CreateDonation, CreateService, ValidateDonation
 
 
@@ -119,17 +115,19 @@ async def api_create_donation(data: CreateDonation, request: Request):
     name = data.name if data.name else "Anonymous"
 
     description = f"{sats} sats donation from {name} to {service.twitchuser}"
-    create_charge_data = CreateCharge(
-        amount=sats,
-        completelink=f"https://twitch.tv/{service.twitchuser}",
-        completelinktext="Back to Stream!",
-        webhook=webhook_base + "/streamalerts/api/v1/postdonation",
-        description=description,
+    create_charge_data = {
+        "amount": sats,
+        "completelink": f"https://twitch.tv/{service.twitchuser}",
+        "completelinktext": "Back to Stream!",
+        "webhook": webhook_base + "/streamalerts/api/v1/postdonation",
+        "description": description,
         **charge_details,
-    )
-    charge = await create_charge(user=charge_details["user"], data=create_charge_data)
+    }
+    wallet = await get_wallet(service.wallet)
+    assert wallet, f"Could not fetch wallet: {service.wallet}"
+    charge_id = await create_charge(data=create_charge_data, api_key=wallet.inkey)
     await create_donation(
-        id=charge.id,
+        id=charge_id,
         wallet=service.wallet,
         message=message,
         name=name,
@@ -138,7 +136,7 @@ async def api_create_donation(data: CreateDonation, request: Request):
         amount=amount,
         service=data.service,
     )
-    return {"redirect_url": f"/satspay/{charge.id}"}
+    return {"redirect_url": f"/satspay/{charge_id}"}
 
 
 @streamalerts_ext.post("/api/v1/postdonation")
@@ -147,7 +145,16 @@ async def api_post_donation(request: Request, data: ValidateDonation):
     This endpoint acts as a webhook for the SatsPayServer extension."""
 
     donation_id = data.id
-    charge = await get_charge(donation_id)
+    donation = await get_donation(donation_id)
+    if not donation:
+        raise HTTPException(
+            status_code=HTTPStatus.NOT_FOUND,
+            detail=f"Donation '{donation_id}' not found!",
+        )
+    wallet = await get_wallet(donation.wallet)
+    assert wallet, f"Could not fetch wallet: {donation.wallet}"
+
+    charge = await get_charge_status(donation_id, wallet.inkey)
     if charge and charge.paid:
         return await post_donation(donation_id)
     else:

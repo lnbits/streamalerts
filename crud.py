@@ -107,7 +107,11 @@ async def post_donation(donation_id: str) -> dict:
     else:
         return {"message": "Unsopported servicename"}
     await db.execute(
-        "UPDATE streamalerts.Donations SET posted = 1 WHERE id = ?", (donation_id,)
+        "UPDATE streamalerts.Donations SET posted = ? WHERE id = ?",
+        (
+            True,
+            donation_id,
+        ),
     )
     return response.json()
 
