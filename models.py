@@ -65,3 +65,8 @@ class Service(BaseModel):
     @classmethod
     def from_row(cls, row: Row) -> "Service":
         return cls(**dict(row))
+
+
+class ChargeStatus(BaseModel):
+    id: str
+    paid: bool
