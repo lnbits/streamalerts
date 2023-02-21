@@ -26,7 +26,7 @@ from .crud import (
     update_donation,
     update_service,
 )
-from .helpers import create_charge, get_charge_status
+from .helpers import create_charge, delete_charge, get_charge_status
 from .models import CreateDonation, CreateService, ValidateDonation
 
 
@@ -256,6 +256,7 @@ async def api_delete_donation(donation_id, g: WalletTypeInfo = Depends(get_key_t
             detail="Not authorized to delete this donation!",
         )
     await delete_donation(donation_id)
+    await delete_charge(donation_id, g.wallet.inkey)
     return "", HTTPStatus.NO_CONTENT
 
 
@@ -272,5 +273,8 @@ async def api_delete_service(service_id, g: WalletTypeInfo = Depends(get_key_typ
             status_code=HTTPStatus.FORBIDDEN,
             detail="Not authorized to delete this service!",
         )
-    await delete_service(service_id)
+    donations = await delete_service(service_id)
+    for d in donations:
+        await delete_charge(d, g.wallet.inkey)
+
     return "", HTTPStatus.NO_CONTENT
