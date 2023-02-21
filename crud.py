@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import List, Optional
 
 import httpx
 
@@ -6,8 +6,6 @@ from lnbits.core.crud import get_wallet
 from lnbits.db import SQLITE
 from lnbits.helpers import urlsafe_short_hash
 
-# todo: use the API, not direct import
-from ..satspay.crud import delete_charge  # type: ignore
 from . import db
 from .models import CreateService, Donation, Service
 
@@ -228,14 +226,17 @@ async def service_add_token(service_id, token):
     return True
 
 
-async def delete_service(service_id: int) -> None:
+async def delete_service(service_id: int) -> List[str]:
     """Delete a Service and all corresponding Donations"""
-    await db.execute("DELETE FROM streamalerts.Services WHERE id = ?", (service_id,))
     rows = await db.fetchall(
         "SELECT * FROM streamalerts.Donations WHERE service = ?", (service_id,)
     )
     for row in rows:
         await delete_donation(row["id"])
+
+    await db.execute("DELETE FROM streamalerts.Services WHERE id = ?", (service_id,))
+
+    return [row["id"] for row in rows]
 
 
 async def get_donation(donation_id: str) -> Optional[Donation]:
@@ -257,7 +258,6 @@ async def get_donations(wallet_id: str) -> Optional[list]:
 async def delete_donation(donation_id: str) -> None:
     """Delete a Donation and its corresponding statspay charge"""
     await db.execute("DELETE FROM streamalerts.Donations WHERE id = ?", (donation_id,))
-    await delete_charge(donation_id)
 
 
 async def update_donation(donation_id: str, **kwargs) -> Donation:
