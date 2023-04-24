@@ -1,4 +1,6 @@
-<h1>Stream Alerts</h1>
+# Stream Alerts - <small>[LNbits](https://github.com/lnbits/lnbits) extension</small>
+<small>For more about LNBits extension check [this tutorial](https://github.com/lnbits/lnbits/wiki/LNbits-Extensions)</small>
+
 <h2>Integrate Bitcoin Donations into your livestream alerts</h2>
 The StreamAlerts extension allows you to integrate Bitcoin Lightning (and on-chain) paymnents in to your existing Streamlabs alerts!
 
