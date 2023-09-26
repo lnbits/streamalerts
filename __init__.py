@@ -1,5 +1,4 @@
 from fastapi import APIRouter
-from fastapi.staticfiles import StaticFiles
 
 from lnbits.db import Database
 from lnbits.helpers import template_renderer
@@ -11,7 +10,6 @@ streamalerts_ext: APIRouter = APIRouter(prefix="/streamalerts", tags=["streamale
 streamalerts_static_files = [
     {
         "path": "/streamalerts/static",
-        "app": StaticFiles(directory="lnbits/extensions/streamalerts/static"),
         "name": "streamalerts_static",
     }
 ]
