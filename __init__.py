@@ -16,7 +16,7 @@ streamalerts_static_files = [
 
 
 def streamalerts_renderer():
-    return template_renderer(["lnbits/extensions/streamalerts/templates"])
+    return template_renderer(["streamalerts/templates"])
 
 
 from .views import *  # noqa: F401,F403
