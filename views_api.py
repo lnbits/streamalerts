@@ -1,15 +1,12 @@
 from http import HTTPStatus
 
-from fastapi import Depends, Query
-from starlette.exceptions import HTTPException
-from starlette.requests import Request
-from starlette.responses import RedirectResponse
-
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import RedirectResponse
 from lnbits.core.crud import get_user, get_wallet
-from lnbits.decorators import WalletTypeInfo, get_key_type
+from lnbits.core.models import WalletTypeInfo
+from lnbits.decorators import get_key_type
 from lnbits.utils.exchange_rates import btc_price
 
-from . import streamalerts_ext
 from .crud import (
     authenticate_service,
     create_donation,
@@ -29,21 +26,23 @@ from .crud import (
 from .helpers import create_charge, delete_charge, get_charge_status
 from .models import CreateDonation, CreateService, ValidateDonation
 
+streamalerts_api_router = APIRouter()
 
-@streamalerts_ext.post("/api/v1/services")
-async def api_create_service(
-    data: CreateService, wallet: WalletTypeInfo = Depends(get_key_type)
-):
+
+@streamalerts_api_router.post("/api/v1/services", dependencies=[Depends(get_key_type)])
+async def api_create_service(data: CreateService):
     """Create a service, which holds data about how/where to post donations"""
     try:
         service = await create_service(data=data)
-    except Exception as e:
-        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
+    except Exception as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(exc)
+        ) from exc
 
     return service.dict()
 
 
-@streamalerts_ext.get("/api/v1/getaccess/{service_id}")
+@streamalerts_api_router.get("/api/v1/getaccess/{service_id}")
 async def api_get_access(service_id, request: Request):
     """Redirect to Streamlabs' Approve/Decline page for API access for Service
     with service_id
@@ -68,7 +67,7 @@ async def api_get_access(service_id, request: Request):
         )
 
 
-@streamalerts_ext.get("/api/v1/authenticate/{service_id}")
+@streamalerts_api_router.get("/api/v1/authenticate/{service_id}")
 async def api_authenticate_service(
     service_id, request: Request, code: str = Query(...), state: str = Query(...)
 ):
@@ -97,7 +96,7 @@ async def api_authenticate_service(
         )
 
 
-@streamalerts_ext.post("/api/v1/donations")
+@streamalerts_api_router.post("/api/v1/donations")
 async def api_create_donation(data: CreateDonation, request: Request):
     """Take data from donation form and return satspay charge"""
     # Currency is hardcoded while frotnend is limited
@@ -127,7 +126,7 @@ async def api_create_donation(data: CreateDonation, request: Request):
     assert wallet, f"Could not fetch wallet: {service.wallet}"
     charge_id = await create_charge(data=create_charge_data, api_key=wallet.inkey)
     await create_donation(
-        id=charge_id,
+        donation_id=charge_id,
         wallet=service.wallet,
         message=message,
         name=name,
@@ -139,8 +138,8 @@ async def api_create_donation(data: CreateDonation, request: Request):
     return {"redirect_url": f"/satspay/{charge_id}"}
 
 
-@streamalerts_ext.post("/api/v1/postdonation")
-async def api_post_donation(request: Request, data: ValidateDonation):
+@streamalerts_api_router.post("/api/v1/postdonation")
+async def api_post_donation(data: ValidateDonation):
     """Post a paid donation to Stremalabs/StreamElements.
     This endpoint acts as a webhook for the SatsPayServer extension."""
 
@@ -163,7 +162,7 @@ async def api_post_donation(request: Request, data: ValidateDonation):
         )
 
 
-@streamalerts_ext.get("/api/v1/services")
+@streamalerts_api_router.get("/api/v1/services")
 async def api_get_services(g: WalletTypeInfo = Depends(get_key_type)):
     """Return list of all services assigned to wallet with given invoice key"""
     user = await get_user(g.wallet.user)
@@ -175,7 +174,7 @@ async def api_get_services(g: WalletTypeInfo = Depends(get_key_type)):
     return [service.dict() for service in services] if services else []
 
 
-@streamalerts_ext.get("/api/v1/donations")
+@streamalerts_api_router.get("/api/v1/donations")
 async def api_get_donations(g: WalletTypeInfo = Depends(get_key_type)):
     """Return list of all donations assigned to wallet with given invoice
     key
@@ -189,7 +188,7 @@ async def api_get_donations(g: WalletTypeInfo = Depends(get_key_type)):
     return [donation.dict() for donation in donations] if donations else []
 
 
-@streamalerts_ext.put("/api/v1/donations/{donation_id}")
+@streamalerts_api_router.put("/api/v1/donations/{donation_id}")
 async def api_update_donation(
     data: CreateDonation, donation_id=None, g: WalletTypeInfo = Depends(get_key_type)
 ):
@@ -216,7 +215,7 @@ async def api_update_donation(
     return donation.dict()
 
 
-@streamalerts_ext.put("/api/v1/services/{service_id}")
+@streamalerts_api_router.put("/api/v1/services/{service_id}")
 async def api_update_service(
     data: CreateService, service_id=None, g: WalletTypeInfo = Depends(get_key_type)
 ):
@@ -242,7 +241,7 @@ async def api_update_service(
     return service.dict()
 
 
-@streamalerts_ext.delete("/api/v1/donations/{donation_id}")
+@streamalerts_api_router.delete("/api/v1/donations/{donation_id}")
 async def api_delete_donation(donation_id, g: WalletTypeInfo = Depends(get_key_type)):
     """Delete the donation with the given donation_id"""
     donation = await get_donation(donation_id)
@@ -260,7 +259,7 @@ async def api_delete_donation(donation_id, g: WalletTypeInfo = Depends(get_key_t
     return "", HTTPStatus.NO_CONTENT
 
 
-@streamalerts_ext.delete("/api/v1/services/{service_id}")
+@streamalerts_api_router.delete("/api/v1/services/{service_id}")
 async def api_delete_service(service_id, g: WalletTypeInfo = Depends(get_key_type)):
     """Delete the service with the given service_id"""
     service = await get_service(service_id)

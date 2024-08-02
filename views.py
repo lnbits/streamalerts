@@ -1,21 +1,23 @@
 from http import HTTPStatus
 
-from fastapi import Depends
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
-from starlette.exceptions import HTTPException
-from starlette.requests import Request
-from starlette.responses import HTMLResponse
-
 from lnbits.core.models import User
 from lnbits.decorators import check_user_exists
+from lnbits.helpers import template_renderer
 
-from . import streamalerts_ext, streamalerts_renderer
 from .crud import get_service
 
 templates = Jinja2Templates(directory="templates")
+streamalerts_generic_router = APIRouter()
 
 
-@streamalerts_ext.get("/", response_class=HTMLResponse)
+def streamalerts_renderer():
+    return template_renderer(["streamalerts/templates"])
+
+
+@streamalerts_generic_router.get("/", response_class=HTMLResponse)
 async def index(request: Request, user: User = Depends(check_user_exists)):
     """Return the extension's settings page"""
     return streamalerts_renderer().TemplateResponse(
@@ -23,7 +25,7 @@ async def index(request: Request, user: User = Depends(check_user_exists)):
     )
 
 
-@streamalerts_ext.get("/{state}")
+@streamalerts_generic_router.get("/{state}")
 async def donation(state, request: Request):
     """Return the donation form for the Service corresponding to state"""
     service = await get_service(0, by_state=state)

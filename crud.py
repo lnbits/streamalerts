@@ -1,13 +1,13 @@
-from typing import List, Optional
+from typing import Optional
 
 import httpx
-
 from lnbits.core.crud import get_wallet
-from lnbits.db import SQLITE
+from lnbits.db import SQLITE, Database
 from lnbits.helpers import urlsafe_short_hash
 
-from . import db
 from .models import CreateService, Donation, Service
+
+db = Database("ext_streamalerts")
 
 
 async def get_service_redirect_uri(request, service_id):
@@ -40,7 +40,7 @@ async def get_charge_details(service_id):
 
 
 async def create_donation(
-    id: str,
+    donation_id: str,
     wallet: str,
     cur_code: str,
     sats: int,
@@ -66,10 +66,10 @@ async def create_donation(
         )
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (id, wallet, name, message, cur_code, sats, amount, service, posted),
+        (donation_id, wallet, name, message, cur_code, sats, amount, service, posted),
     )
 
-    donation = await get_donation(id)
+    donation = await get_donation(donation_id)
     assert donation, "Newly created donation couldn't be retrieved"
     return donation
 
@@ -120,7 +120,7 @@ async def create_service(data: CreateService) -> Service:
     returning = "" if db.type == SQLITE else "RETURNING ID"
     method = db.execute if db.type == SQLITE else db.fetchone
 
-    result = await (method)(
+    result = await method(
         f"""
         INSERT INTO streamalerts.Services (
             twitchuser,
@@ -226,7 +226,7 @@ async def service_add_token(service_id, token):
     return True
 
 
-async def delete_service(service_id: int) -> List[str]:
+async def delete_service(service_id: int) -> list[str]:
     """Delete a Service and all corresponding Donations"""
     rows = await db.fetchall(
         "SELECT * FROM streamalerts.Donations WHERE service = ?", (service_id,)
