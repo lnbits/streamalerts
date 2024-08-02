@@ -1,11 +1,12 @@
 from fastapi import APIRouter
 
-from lnbits.db import Database
-from lnbits.helpers import template_renderer
-
-db = Database("ext_streamalerts")
+from .crud import db
+from .views import streamalerts_generic_router
+from .views_api import streamalerts_api_router
 
 streamalerts_ext: APIRouter = APIRouter(prefix="/streamalerts", tags=["streamalerts"])
+streamalerts_ext.include_router(streamalerts_generic_router)
+streamalerts_ext.include_router(streamalerts_api_router)
 
 streamalerts_static_files = [
     {
@@ -14,10 +15,4 @@ streamalerts_static_files = [
     }
 ]
 
-
-def streamalerts_renderer():
-    return template_renderer(["streamalerts/templates"])
-
-
-from .views import *  # noqa: F401,F403
-from .views_api import *  # noqa: F401,F403
+__all__ = ["db", "streamalerts_ext", "streamalerts_static_files"]

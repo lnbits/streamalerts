@@ -1,6 +1,5 @@
 import httpx
-
-from lnbits.app import settings
+from lnbits.settings import settings
 
 from .models import ChargeStatus
 
