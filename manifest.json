@@ -1,9 +1,9 @@
 {
-    "repos": [
-        {
-            "id": "streamalerts",
-            "organisation": "lnbits",
-            "repository": "streamalerts"
-        }
-    ]
+  "repos": [
+    {
+      "id": "streamalerts",
+      "organisation": "lnbits",
+      "repository": "streamalerts"
+    }
+  ]
 }

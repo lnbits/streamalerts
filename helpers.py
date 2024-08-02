@@ -27,6 +27,7 @@ async def get_charge_status(charge_id: str, api_key: str) -> ChargeStatus:
         r.raise_for_status()
         return ChargeStatus.parse_obj(r.json())
 
+
 async def delete_charge(charge_id: str, api_key: str):
     async with httpx.AsyncClient() as client:
         headers = {"X-API-KEY": api_key}

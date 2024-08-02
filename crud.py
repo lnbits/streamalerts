@@ -120,7 +120,7 @@ async def create_service(data: CreateService) -> Service:
     returning = "" if db.type == SQLITE else "RETURNING ID"
     method = db.execute if db.type == SQLITE else db.fetchone
 
-    result = await (method)(
+    result = await method(
         f"""
         INSERT INTO streamalerts.Services (
             twitchuser,
