@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse
 from lnbits.core.crud import get_user, get_wallet
 from lnbits.core.models import WalletTypeInfo
-from lnbits.decorators import get_key_type
+from lnbits.decorators import require_admin_key, require_invoice_key
 from lnbits.utils.exchange_rates import btc_price
 
 from .crud import (
@@ -13,7 +13,6 @@ from .crud import (
     create_service,
     delete_donation,
     delete_service,
-    get_charge_details,
     get_donation,
     get_donations,
     get_service,
@@ -24,13 +23,15 @@ from .crud import (
     update_service,
 )
 from .helpers import create_charge, delete_charge, get_charge_status
-from .models import CreateDonation, CreateService, ValidateDonation
+from .models import CreateDonation, CreateService, Donation, Service, ValidateDonation
 
 streamalerts_api_router = APIRouter()
 
 
-@streamalerts_api_router.post("/api/v1/services", dependencies=[Depends(get_key_type)])
-async def api_create_service(data: CreateService):
+@streamalerts_api_router.post(
+    "/api/v1/services", dependencies=[Depends(require_admin_key)]
+)
+async def api_create_service(data: CreateService) -> Service:
     """Create a service, which holds data about how/where to post donations"""
     try:
         service = await create_service(data=data)
@@ -39,7 +40,7 @@ async def api_create_service(data: CreateService):
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(exc)
         ) from exc
 
-    return service.dict()
+    return service
 
 
 @streamalerts_api_router.get("/api/v1/getaccess/{service_id}")
@@ -100,40 +101,38 @@ async def api_authenticate_service(
 async def api_create_donation(data: CreateDonation, request: Request):
     """Take data from donation form and return satspay charge"""
     # Currency is hardcoded while frotnend is limited
-    cur_code = "USD"
-    sats = data.sats
-    message = data.message
     # Fiat amount is calculated here while frontend is limited
-    price = await btc_price(cur_code)
-    amount = sats * (10 ** (-8)) * price
+    price = await btc_price(data.cur_code)
+    amount = data.sats * (10 ** (-8)) * price
     webhook_base = request.url.scheme + "://" + request.headers["Host"]
-    service_id = data.service
-    service = await get_service(service_id)
-    assert service
-    charge_details = await get_charge_details(service.id)
-    name = data.name if data.name else "Anonymous"
-
-    description = f"{sats} sats donation from {name} to {service.twitchuser}"
+    service = await get_service(data.service)
+    if not service:
+        raise HTTPException(
+            status_code=HTTPStatus.NOT_FOUND, detail="Service not found!"
+        )
+    wallet = await get_wallet(service.wallet)
+    if not wallet:
+        raise HTTPException(
+            status_code=HTTPStatus.NOT_FOUND, detail="Wallet not found!"
+        )
+    description = f"{data.sats} sats donation from {data.name} to {service.twitchuser}"
     create_charge_data = {
-        "amount": sats,
+        "amount": data.sats,
         "completelink": f"https://twitch.tv/{service.twitchuser}",
         "completelinktext": "Back to Stream!",
         "webhook": webhook_base + "/streamalerts/api/v1/postdonation",
         "description": description,
-        **charge_details,
+        "time": 1440,
+        "lnbitswallet": service.wallet,
+        "onchainwallet": service.onchain,
+        "user": wallet.user,
     }
-    wallet = await get_wallet(service.wallet)
     assert wallet, f"Could not fetch wallet: {service.wallet}"
     charge_id = await create_charge(data=create_charge_data, api_key=wallet.inkey)
     await create_donation(
+        data=data,
         donation_id=charge_id,
-        wallet=service.wallet,
-        message=message,
-        name=name,
-        cur_code=cur_code,
-        sats=data.sats,
         amount=amount,
-        service=data.service,
     )
     return {"redirect_url": f"/satspay/{charge_id}"}
 
@@ -163,117 +162,121 @@ async def api_post_donation(data: ValidateDonation):
 
 
 @streamalerts_api_router.get("/api/v1/services")
-async def api_get_services(g: WalletTypeInfo = Depends(get_key_type)):
+async def api_get_services(
+    key_info: WalletTypeInfo = Depends(require_invoice_key),
+) -> list[Service]:
     """Return list of all services assigned to wallet with given invoice key"""
-    user = await get_user(g.wallet.user)
+    user = await get_user(key_info.wallet.user)
     wallet_ids = user.wallet_ids if user else []
     services = []
     for wallet_id in wallet_ids:
         new_services = await get_services(wallet_id)
         services += new_services if new_services else []
-    return [service.dict() for service in services] if services else []
+    return services
 
 
 @streamalerts_api_router.get("/api/v1/donations")
-async def api_get_donations(g: WalletTypeInfo = Depends(get_key_type)):
+async def api_get_donations(
+    key_info: WalletTypeInfo = Depends(require_invoice_key),
+) -> list[Donation]:
     """Return list of all donations assigned to wallet with given invoice
     key
     """
-    user = await get_user(g.wallet.user)
+    user = await get_user(key_info.wallet.user)
     wallet_ids = user.wallet_ids if user else []
     donations = []
     for wallet_id in wallet_ids:
         new_donations = await get_donations(wallet_id)
         donations += new_donations if new_donations else []
-    return [donation.dict() for donation in donations] if donations else []
+    return donations
 
 
 @streamalerts_api_router.put("/api/v1/donations/{donation_id}")
 async def api_update_donation(
-    data: CreateDonation, donation_id=None, g: WalletTypeInfo = Depends(get_key_type)
-):
+    data: CreateDonation,
+    donation_id: str,
+    key_info: WalletTypeInfo = Depends(require_admin_key),
+) -> Donation:
     """Update a donation with the data given in the request"""
-    if donation_id:
-        donation = await get_donation(donation_id)
+    donation = await get_donation(donation_id)
 
-        if not donation:
-            raise HTTPException(
-                status_code=HTTPStatus.NOT_FOUND, detail="Donation does not exist."
-            )
-
-        if donation.wallet != g.wallet.id:
-            raise HTTPException(
-                status_code=HTTPStatus.FORBIDDEN, detail="Not your donation."
-            )
-
-        donation = await update_donation(donation_id, **data.dict())
-    else:
+    if not donation:
         raise HTTPException(
-            status_code=HTTPStatus.BAD_REQUEST, detail="No donation ID specified"
+            status_code=HTTPStatus.NOT_FOUND, detail="Donation does not exist."
         )
 
-    return donation.dict()
+    if donation.wallet != key_info.wallet.id:
+        raise HTTPException(
+            status_code=HTTPStatus.FORBIDDEN, detail="Not your donation."
+        )
+
+    for k, v in data.dict().items():
+        setattr(donation, k, v)
+    await update_donation(donation)
+    return donation
 
 
 @streamalerts_api_router.put("/api/v1/services/{service_id}")
 async def api_update_service(
-    data: CreateService, service_id=None, g: WalletTypeInfo = Depends(get_key_type)
-):
+    service_id: str,
+    data: CreateService,
+    key_info: WalletTypeInfo = Depends(require_admin_key),
+) -> Service:
     """Update a service with the data given in the request"""
-    if service_id:
-        service = await get_service(service_id)
+    service = await get_service(service_id)
 
-        if not service:
-            raise HTTPException(
-                status_code=HTTPStatus.NOT_FOUND, detail="Service does not exist."
-            )
-
-        if service.wallet != g.wallet.id:
-            raise HTTPException(
-                status_code=HTTPStatus.FORBIDDEN, detail="Not your service."
-            )
-
-        service = await update_service(service_id, **data.dict())
-    else:
+    if not service:
         raise HTTPException(
-            status_code=HTTPStatus.BAD_REQUEST, detail="No service ID specified"
+            status_code=HTTPStatus.NOT_FOUND, detail="Service does not exist."
         )
-    return service.dict()
+
+    if service.wallet != key_info.wallet.id:
+        raise HTTPException(
+            status_code=HTTPStatus.FORBIDDEN, detail="Not your service."
+        )
+
+    for k, v in data.dict().items():
+        setattr(service, k, v)
+
+    service = await update_service(service)
+    return service
 
 
 @streamalerts_api_router.delete("/api/v1/donations/{donation_id}")
-async def api_delete_donation(donation_id, g: WalletTypeInfo = Depends(get_key_type)):
+async def api_delete_donation(
+    donation_id: str, key_info: WalletTypeInfo = Depends(require_admin_key)
+):
     """Delete the donation with the given donation_id"""
     donation = await get_donation(donation_id)
     if not donation:
         raise HTTPException(
             status_code=HTTPStatus.NOT_FOUND, detail="No donation with this ID!"
         )
-    if donation.wallet != g.wallet.id:
+    if donation.wallet != key_info.wallet.id:
         raise HTTPException(
             status_code=HTTPStatus.FORBIDDEN,
             detail="Not authorized to delete this donation!",
         )
     await delete_donation(donation_id)
-    await delete_charge(donation_id, g.wallet.inkey)
+    await delete_charge(donation_id, key_info.wallet.adminkey)
     return "", HTTPStatus.NO_CONTENT
 
 
 @streamalerts_api_router.delete("/api/v1/services/{service_id}")
-async def api_delete_service(service_id, g: WalletTypeInfo = Depends(get_key_type)):
+async def api_delete_service(
+    service_id: str, key_info: WalletTypeInfo = Depends(require_admin_key)
+):
     """Delete the service with the given service_id"""
     service = await get_service(service_id)
     if not service:
         raise HTTPException(
             status_code=HTTPStatus.NOT_FOUND, detail="No service with this ID!"
         )
-    if service.wallet != g.wallet.id:
+    if service.wallet != key_info.wallet.id:
         raise HTTPException(
             status_code=HTTPStatus.FORBIDDEN,
             detail="Not authorized to delete this service!",
         )
     donations = await delete_service(service_id)
     for d in donations:
-        await delete_charge(d, g.wallet.inkey)
-
-    return "", HTTPStatus.NO_CONTENT
+        await delete_charge(d, key_info.wallet.adminkey)

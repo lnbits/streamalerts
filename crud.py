@@ -2,10 +2,10 @@ from typing import Optional
 
 import httpx
 from lnbits.core.crud import get_wallet
-from lnbits.db import SQLITE, Database
-from lnbits.helpers import urlsafe_short_hash
+from lnbits.db import Database
+from lnbits.helpers import insert_query, update_query, urlsafe_short_hash
 
-from .models import CreateService, Donation, Service
+from .models import CreateDonation, CreateService, Donation, Service
 
 db = Database("ext_streamalerts")
 
@@ -18,59 +18,16 @@ async def get_service_redirect_uri(request, service_id):
     return redirect_uri
 
 
-async def get_charge_details(service_id):
-    """Return the default details for a satspay charge
-
-    These might be different depending for services implemented in the future.
-    """
-    service = await get_service(service_id)
-    assert service, f"Could not fetch service: {service_id}"
-
-    wallet_id = service.wallet
-    wallet = await get_wallet(wallet_id)
-    assert wallet, f"Could not fetch wallet: {wallet_id}"
-
-    user = wallet.user
-    return {
-        "time": 1440,
-        "user": user,
-        "lnbitswallet": wallet_id,
-        "onchainwallet": service.onchain,
-    }
-
-
 async def create_donation(
-    donation_id: str,
-    wallet: str,
-    cur_code: str,
-    sats: int,
-    amount: float,
-    service: int,
-    name: str = "Anonymous",
-    message: str = "",
-    posted: bool = False,
+    data: CreateDonation, amount: float, donation_id: Optional[str] = None
 ) -> Donation:
     """Create a new Donation"""
-    await db.execute(
-        """
-        INSERT INTO streamalerts.Donations (
-            id,
-            wallet,
-            name,
-            message,
-            cur_code,
-            sats,
-            amount,
-            service,
-            posted
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (donation_id, wallet, name, message, cur_code, sats, amount, service, posted),
+    donation = Donation(
+        id=donation_id or urlsafe_short_hash(),
+        amount=amount,
+        **data.dict(),
     )
-
-    donation = await get_donation(donation_id)
-    assert donation, "Newly created donation couldn't be retrieved"
+    await db.execute(insert_query("streamalerts.Donations", donation), donation.dict())
     return donation
 
 
@@ -105,59 +62,24 @@ async def post_donation(donation_id: str) -> dict:
     else:
         return {"message": "Unsopported servicename"}
     await db.execute(
-        "UPDATE streamalerts.Donations SET posted = ? WHERE id = ?",
-        (
-            True,
-            donation_id,
-        ),
+        "UPDATE streamalerts.Donations SET posted = :posted WHERE id = :id",
+        {"id": donation_id, "posted": True},
     )
     return response.json()
 
 
 async def create_service(data: CreateService) -> Service:
     """Create a new Service"""
-
-    returning = "" if db.type == SQLITE else "RETURNING ID"
-    method = db.execute if db.type == SQLITE else db.fetchone
-
-    result = await method(
-        f"""
-        INSERT INTO streamalerts.Services (
-            twitchuser,
-            client_id,
-            client_secret,
-            wallet,
-            servicename,
-            authenticated,
-            state,
-            onchain
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        {returning}
-        """,
-        (
-            data.twitchuser,
-            data.client_id,
-            data.client_secret,
-            data.wallet,
-            data.servicename,
-            False,
-            urlsafe_short_hash(),
-            data.onchain,
-        ),
+    service = Service(
+        id=urlsafe_short_hash(),
+        **data.dict(),
     )
-    if db.type == SQLITE:
-        service_id = result._result_proxy.lastrowid
-    else:
-        service_id = result[0]  # type: ignore
-
-    service = await get_service(service_id)
-    assert service, f"Could not fetch service: {service_id}"
+    await db.execute(insert_query("streamalerts.Services", service), service.dict())
     return service
 
 
 async def get_service(
-    service_id: int, by_state: Optional[str] = None
+    service_id: Optional[str] = None, by_state: Optional[str] = None
 ) -> Optional[Service]:
     """Return a service either by ID or, available, by state
 
@@ -165,23 +87,27 @@ async def get_service(
     instead of the ID, preventing accidental payments to the wrong
     streamer via typos like 2 -> 3.
     """
+    assert service_id or by_state, "Must provide either service_id or by_state"
     if by_state:
         row = await db.fetchone(
-            "SELECT * FROM streamalerts.Services WHERE state = ?", (by_state,)
+            "SELECT * FROM streamalerts.Services WHERE state = :state",
+            {"state": by_state},
         )
     else:
         row = await db.fetchone(
-            "SELECT * FROM streamalerts.Services WHERE id = ?", (service_id,)
+            "SELECT * FROM streamalerts.Services WHERE id = :id",
+            {"id": service_id},
         )
-    return Service.from_row(row) if row else None
+    return Service(**row) if row else None
 
 
-async def get_services(wallet_id: str) -> Optional[list]:
+async def get_services(wallet_id: str) -> list[Service]:
     """Return all services belonging assigned to the wallet_id"""
     rows = await db.fetchall(
-        "SELECT * FROM streamalerts.Services WHERE wallet = ?", (wallet_id,)
+        "SELECT * FROM streamalerts.Services WHERE wallet = :wallet",
+        {"wallet": wallet_id},
     )
-    return [Service.from_row(row) for row in rows] if rows else None
+    return [Service(**row) for row in rows]
 
 
 async def authenticate_service(service_id, code, redirect_uri):
@@ -220,21 +146,27 @@ async def service_add_token(service_id, token):
         return False
 
     await db.execute(
-        "UPDATE streamalerts.Services SET authenticated = 1, token = ? where id = ?",
-        (token, service_id),
+        """
+        UPDATE streamalerts.Services
+        SET authenticated = 1, token = :token WHERE id = :id
+        """,
+        {"id": service_id, "token": token},
     )
     return True
 
 
-async def delete_service(service_id: int) -> list[str]:
+async def delete_service(service_id: str) -> list[str]:
     """Delete a Service and all corresponding Donations"""
     rows = await db.fetchall(
-        "SELECT * FROM streamalerts.Donations WHERE service = ?", (service_id,)
+        "SELECT * FROM streamalerts.Donations WHERE service = :service",
+        {"service": service_id},
     )
     for row in rows:
         await delete_donation(row["id"])
 
-    await db.execute("DELETE FROM streamalerts.Services WHERE id = ?", (service_id,))
+    await db.execute(
+        "DELETE FROM streamalerts.Services WHERE id = :id", {"id": service_id}
+    )
 
     return [row["id"] for row in rows]
 
@@ -242,47 +174,41 @@ async def delete_service(service_id: int) -> list[str]:
 async def get_donation(donation_id: str) -> Optional[Donation]:
     """Return a Donation"""
     row = await db.fetchone(
-        "SELECT * FROM streamalerts.Donations WHERE id = ?", (donation_id,)
+        "SELECT * FROM streamalerts.Donations WHERE id = :id",
+        {"id": donation_id},
     )
-    return Donation.from_row(row) if row else None
+    return Donation(**row) if row else None
 
 
-async def get_donations(wallet_id: str) -> Optional[list]:
+async def get_donations(wallet_id: str) -> list[Donation]:
     """Return all streamalerts.Donations assigned to wallet_id"""
     rows = await db.fetchall(
-        "SELECT * FROM streamalerts.Donations WHERE wallet = ?", (wallet_id,)
+        "SELECT * FROM streamalerts.Donations WHERE wallet = :wallet",
+        {"wallet": wallet_id},
     )
-    return [Donation.from_row(row) for row in rows] if rows else None
+    return [Donation(**row) for row in rows]
 
 
 async def delete_donation(donation_id: str) -> None:
     """Delete a Donation and its corresponding statspay charge"""
-    await db.execute("DELETE FROM streamalerts.Donations WHERE id = ?", (donation_id,))
+    await db.execute(
+        "DELETE FROM streamalerts.Donations WHERE id = :id", {"id": donation_id}
+    )
 
 
-async def update_donation(donation_id: str, **kwargs) -> Donation:
+async def update_donation(donation: Donation) -> Donation:
     """Update a Donation"""
-    q = ", ".join([f"{field[0]} = ?" for field in kwargs.items()])
     await db.execute(
-        f"UPDATE streamalerts.Donations SET {q} WHERE id = ?",
-        (*kwargs.values(), donation_id),
+        update_query("streamalerts.Donations", donation),
+        donation.dict(),
     )
-    row = await db.fetchone(
-        "SELECT * FROM streamalerts.Donations WHERE id = ?", (donation_id,)
-    )
-    assert row, "Newly updated donation couldn't be retrieved"
-    return Donation(**row)
+    return donation
 
 
-async def update_service(service_id: str, **kwargs) -> Service:
+async def update_service(service: Service) -> Service:
     """Update a service"""
-    q = ", ".join([f"{field[0]} = ?" for field in kwargs.items()])
     await db.execute(
-        f"UPDATE streamalerts.Services SET {q} WHERE id = ?",
-        (*kwargs.values(), service_id),
+        update_query("streamalerts.Services", service),
+        service.dict(),
     )
-    row = await db.fetchone(
-        "SELECT * FROM streamalerts.Services WHERE id = ?", (service_id,)
-    )
-    assert row, "Newly updated service couldn't be retrieved"
-    return Service(**row)
+    return service
