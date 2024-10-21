@@ -3,7 +3,7 @@ from typing import Optional
 import httpx
 from lnbits.core.crud import get_wallet
 from lnbits.db import Database
-from lnbits.helpers import insert_query, update_query, urlsafe_short_hash
+from lnbits.helpers import urlsafe_short_hash
 
 from .models import CreateDonation, CreateService, Donation, Service
 
@@ -27,7 +27,7 @@ async def create_donation(
         amount=amount,
         **data.dict(),
     )
-    await db.execute(insert_query("streamalerts.Donations", donation), donation.dict())
+    await db.insert("streamalerts.Donations", donation)
     return donation
 
 
@@ -74,7 +74,7 @@ async def create_service(data: CreateService) -> Service:
         id=urlsafe_short_hash(),
         **data.dict(),
     )
-    await db.execute(insert_query("streamalerts.Services", service), service.dict())
+    await db.insert("streamalerts.Services", service)
     return service
 
 
@@ -89,25 +89,26 @@ async def get_service(
     """
     assert service_id or by_state, "Must provide either service_id or by_state"
     if by_state:
-        row = await db.fetchone(
+        return await db.fetchone(
             "SELECT * FROM streamalerts.Services WHERE state = :state",
             {"state": by_state},
+            Service,
         )
     else:
-        row = await db.fetchone(
+        return await db.fetchone(
             "SELECT * FROM streamalerts.Services WHERE id = :id",
             {"id": service_id},
+            Service,
         )
-    return Service(**row) if row else None
 
 
 async def get_services(wallet_id: str) -> list[Service]:
     """Return all services belonging assigned to the wallet_id"""
-    rows = await db.fetchall(
+    return await db.fetchall(
         "SELECT * FROM streamalerts.Services WHERE wallet = :wallet",
         {"wallet": wallet_id},
+        Service,
     )
-    return [Service(**row) for row in rows]
 
 
 async def authenticate_service(service_id, code, redirect_uri):
@@ -157,36 +158,39 @@ async def service_add_token(service_id, token):
 
 async def delete_service(service_id: str) -> list[str]:
     """Delete a Service and all corresponding Donations"""
-    rows = await db.fetchall(
+    donations = await db.fetchall(
         "SELECT * FROM streamalerts.Donations WHERE service = :service",
         {"service": service_id},
+        Donation,
     )
-    for row in rows:
-        await delete_donation(row["id"])
+    donation_ids = []
+    for donation in donations:
+        donation_ids.append(donation.id)
+        await delete_donation(donation.id)
 
     await db.execute(
         "DELETE FROM streamalerts.Services WHERE id = :id", {"id": service_id}
     )
 
-    return [row["id"] for row in rows]
+    return donation_ids
 
 
 async def get_donation(donation_id: str) -> Optional[Donation]:
     """Return a Donation"""
-    row = await db.fetchone(
+    return await db.fetchone(
         "SELECT * FROM streamalerts.Donations WHERE id = :id",
         {"id": donation_id},
+        Donation,
     )
-    return Donation(**row) if row else None
 
 
 async def get_donations(wallet_id: str) -> list[Donation]:
     """Return all streamalerts.Donations assigned to wallet_id"""
-    rows = await db.fetchall(
+    return await db.fetchall(
         "SELECT * FROM streamalerts.Donations WHERE wallet = :wallet",
         {"wallet": wallet_id},
+        Donation,
     )
-    return [Donation(**row) for row in rows]
 
 
 async def delete_donation(donation_id: str) -> None:
@@ -198,17 +202,11 @@ async def delete_donation(donation_id: str) -> None:
 
 async def update_donation(donation: Donation) -> Donation:
     """Update a Donation"""
-    await db.execute(
-        update_query("streamalerts.Donations", donation),
-        donation.dict(),
-    )
+    await db.update("streamalerts.Donations", donation)
     return donation
 
 
 async def update_service(service: Service) -> Service:
     """Update a service"""
-    await db.execute(
-        update_query("streamalerts.Services", service),
-        service.dict(),
-    )
+    await db.update("streamalerts.Services", service)
     return service
