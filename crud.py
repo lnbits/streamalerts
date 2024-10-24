@@ -19,15 +19,16 @@ async def get_service_redirect_uri(request, service_id):
 
 
 async def create_donation(
-    data: CreateDonation, amount: float, donation_id: Optional[str] = None
+    data: CreateDonation, wallet: str, amount: float, donation_id: Optional[str] = None
 ) -> Donation:
     """Create a new Donation"""
     donation = Donation(
         id=donation_id or urlsafe_short_hash(),
         amount=amount,
+        wallet=wallet,
         **data.dict(),
     )
-    await db.insert("streamalerts.Donations", donation)
+    await db.insert("streamalerts.donations", donation)
     return donation
 
 
@@ -62,7 +63,7 @@ async def post_donation(donation_id: str) -> dict:
     else:
         return {"message": "Unsopported servicename"}
     await db.execute(
-        "UPDATE streamalerts.Donations SET posted = :posted WHERE id = :id",
+        "UPDATE streamalerts.donations SET posted = :posted WHERE id = :id",
         {"id": donation_id, "posted": True},
     )
     return response.json()
@@ -72,9 +73,10 @@ async def create_service(data: CreateService) -> Service:
     """Create a new Service"""
     service = Service(
         id=urlsafe_short_hash(),
+        state=urlsafe_short_hash(),
         **data.dict(),
     )
-    await db.insert("streamalerts.Services", service)
+    await db.insert("streamalerts.services", service)
     return service
 
 
@@ -90,13 +92,13 @@ async def get_service(
     assert service_id or by_state, "Must provide either service_id or by_state"
     if by_state:
         return await db.fetchone(
-            "SELECT * FROM streamalerts.Services WHERE state = :state",
+            "SELECT * FROM streamalerts.services WHERE state = :state",
             {"state": by_state},
             Service,
         )
     else:
         return await db.fetchone(
-            "SELECT * FROM streamalerts.Services WHERE id = :id",
+            "SELECT * FROM streamalerts.services WHERE id = :id",
             {"id": service_id},
             Service,
         )
@@ -105,7 +107,7 @@ async def get_service(
 async def get_services(wallet_id: str) -> list[Service]:
     """Return all services belonging assigned to the wallet_id"""
     return await db.fetchall(
-        "SELECT * FROM streamalerts.Services WHERE wallet = :wallet",
+        "SELECT * FROM streamalerts.services WHERE wallet = :wallet",
         {"wallet": wallet_id},
         Service,
     )
@@ -148,7 +150,7 @@ async def service_add_token(service_id, token):
 
     await db.execute(
         """
-        UPDATE streamalerts.Services
+        UPDATE streamalerts.services
         SET authenticated = 1, token = :token WHERE id = :id
         """,
         {"id": service_id, "token": token},
@@ -157,9 +159,9 @@ async def service_add_token(service_id, token):
 
 
 async def delete_service(service_id: str) -> list[str]:
-    """Delete a Service and all corresponding Donations"""
+    """Delete a Service and all corresponding donations"""
     donations = await db.fetchall(
-        "SELECT * FROM streamalerts.Donations WHERE service = :service",
+        "SELECT * FROM streamalerts.donations WHERE service = :service",
         {"service": service_id},
         Donation,
     )
@@ -169,7 +171,7 @@ async def delete_service(service_id: str) -> list[str]:
         await delete_donation(donation.id)
 
     await db.execute(
-        "DELETE FROM streamalerts.Services WHERE id = :id", {"id": service_id}
+        "DELETE FROM streamalerts.services WHERE id = :id", {"id": service_id}
     )
 
     return donation_ids
@@ -178,16 +180,16 @@ async def delete_service(service_id: str) -> list[str]:
 async def get_donation(donation_id: str) -> Optional[Donation]:
     """Return a Donation"""
     return await db.fetchone(
-        "SELECT * FROM streamalerts.Donations WHERE id = :id",
+        "SELECT * FROM streamalerts.donations WHERE id = :id",
         {"id": donation_id},
         Donation,
     )
 
 
 async def get_donations(wallet_id: str) -> list[Donation]:
-    """Return all streamalerts.Donations assigned to wallet_id"""
+    """Return all streamalerts.donations assigned to wallet_id"""
     return await db.fetchall(
-        "SELECT * FROM streamalerts.Donations WHERE wallet = :wallet",
+        "SELECT * FROM streamalerts.donations WHERE wallet = :wallet",
         {"wallet": wallet_id},
         Donation,
     )
@@ -196,17 +198,17 @@ async def get_donations(wallet_id: str) -> list[Donation]:
 async def delete_donation(donation_id: str) -> None:
     """Delete a Donation and its corresponding statspay charge"""
     await db.execute(
-        "DELETE FROM streamalerts.Donations WHERE id = :id", {"id": donation_id}
+        "DELETE FROM streamalerts.donations WHERE id = :id", {"id": donation_id}
     )
 
 
 async def update_donation(donation: Donation) -> Donation:
     """Update a Donation"""
-    await db.update("streamalerts.Donations", donation)
+    await db.update("streamalerts.donations", donation)
     return donation
 
 
 async def update_service(service: Service) -> Service:
     """Update a service"""
-    await db.update("streamalerts.Services", service)
+    await db.update("streamalerts.services", service)
     return service

@@ -38,7 +38,7 @@ class Donation(BaseModel):
     sats: int
     amount: float  # The donation amount after fiat conversion
     service: str  # The ID of the corresponding Service
-    posted: bool  # Whether the donation has already been posted to a Service
+    posted: bool = False  # Whether the donation has already been posted to a Service
 
 
 class Service(BaseModel):
@@ -53,10 +53,10 @@ class Service(BaseModel):
     client_id: str  # Third party service Client ID
     client_secret: str  # Secret corresponding to the Client ID
     wallet: str
-    onchain: Optional[str]
     servicename: str  # Currently, this will just always be "Streamlabs"
-    authenticated: bool  # Whether a token (see below) has been acquired yet
-    token: Optional[str]  # The token with which to authenticate requests
+    authenticated: bool = False  # Whether a token (see below) has been acquired yet
+    onchain: Optional[str] = None
+    token: Optional[str] = None  # The token with which to authenticate requests
 
 
 class ChargeStatus(BaseModel):

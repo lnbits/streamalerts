@@ -77,12 +77,12 @@
       submitInvoice() {
         axios
           .post('/streamalerts/api/v1/donations', {
-            service: {{ service }},
+            service: '{{ service }}',
             name: this.donationDialog.data.name,
             sats: this.donationDialog.data.sats,
             message: this.donationDialog.data.message
           })
-          .then((response) => {
+          .then(response => {
             this.redirect_url = response.data.redirect_url
             console.log(this.redirect_url)
             window.location.href = this.redirect_url

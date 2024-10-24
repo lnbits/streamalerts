@@ -19,7 +19,7 @@ def streamalerts_renderer():
 async def index(request: Request, user: User = Depends(check_user_exists)):
     """Return the extension's settings page"""
     return streamalerts_renderer().TemplateResponse(
-        "streamalerts/index.html", {"request": request, "user": user.dict()}
+        "streamalerts/index.html", {"request": request, "user": user.json()}
     )
 
 

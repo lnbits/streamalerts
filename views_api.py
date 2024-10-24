@@ -33,44 +33,37 @@ streamalerts_api_router = APIRouter()
 )
 async def api_create_service(data: CreateService) -> Service:
     """Create a service, which holds data about how/where to post donations"""
-    try:
-        service = await create_service(data=data)
-    except Exception as exc:
-        raise HTTPException(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(exc)
-        ) from exc
-
+    service = await create_service(data)
     return service
 
 
 @streamalerts_api_router.get("/api/v1/getaccess/{service_id}")
-async def api_get_access(service_id, request: Request):
+async def api_get_access(service_id: str, request: Request):
     """Redirect to Streamlabs' Approve/Decline page for API access for Service
     with service_id
     """
     service = await get_service(service_id)
-    if service:
-        redirect_uri = await get_service_redirect_uri(request, service_id)
-        params = {
-            "response_type": "code",
-            "client_id": service.client_id,
-            "redirect_uri": redirect_uri,
-            "scope": "donations.create",
-            "state": service.state,
-        }
-        endpoint_url = "https://streamlabs.com/api/v1.0/authorize/?"
-        querystring = "&".join([f"{key}={value}" for key, value in params.items()])
-        redirect_url = endpoint_url + querystring
-        return RedirectResponse(redirect_url)
-    else:
+    if not service:
         raise HTTPException(
             status_code=HTTPStatus.BAD_REQUEST, detail="Service does not exist!"
         )
+    redirect_uri = await get_service_redirect_uri(request, service_id)
+    params = {
+        "response_type": "code",
+        "client_id": service.client_id,
+        "redirect_uri": redirect_uri,
+        "scope": "donations.create",
+        "state": service.state,
+    }
+    endpoint_url = "https://streamlabs.com/api/v1.0/authorize/?"
+    querystring = "&".join([f"{key}={value}" for key, value in params.items()])
+    redirect_url = endpoint_url + querystring
+    return RedirectResponse(redirect_url)
 
 
 @streamalerts_api_router.get("/api/v1/authenticate/{service_id}")
 async def api_authenticate_service(
-    service_id, request: Request, code: str = Query(...), state: str = Query(...)
+    service_id: str, request: Request, code: str = Query(...), state: str = Query(...)
 ):
     """Endpoint visited via redirect during third party API authentication
 
@@ -100,11 +93,6 @@ async def api_authenticate_service(
 @streamalerts_api_router.post("/api/v1/donations")
 async def api_create_donation(data: CreateDonation, request: Request):
     """Take data from donation form and return satspay charge"""
-    # Currency is hardcoded while frotnend is limited
-    # Fiat amount is calculated here while frontend is limited
-    price = await btc_price(data.cur_code)
-    amount = data.sats * (10 ** (-8)) * price
-    webhook_base = request.url.scheme + "://" + request.headers["Host"]
     service = await get_service(data.service)
     if not service:
         raise HTTPException(
@@ -115,6 +103,12 @@ async def api_create_donation(data: CreateDonation, request: Request):
         raise HTTPException(
             status_code=HTTPStatus.NOT_FOUND, detail="Wallet not found!"
         )
+
+    # Currency is hardcoded while frotnend is limited
+    # Fiat amount is calculated here while frontend is limited
+    price = await btc_price(data.cur_code)
+    amount = data.sats * (10 ** (-8)) * price
+    webhook_base = request.url.scheme + "://" + request.headers["Host"]
     description = f"{data.sats} sats donation from {data.name} to {service.twitchuser}"
     create_charge_data = {
         "amount": data.sats,
@@ -127,12 +121,12 @@ async def api_create_donation(data: CreateDonation, request: Request):
         "onchainwallet": service.onchain,
         "user": wallet.user,
     }
-    assert wallet, f"Could not fetch wallet: {service.wallet}"
     charge_id = await create_charge(data=create_charge_data, api_key=wallet.inkey)
     await create_donation(
         data=data,
-        donation_id=charge_id,
+        wallet=service.wallet,
         amount=amount,
+        donation_id=charge_id,
     )
     return {"redirect_url": f"/satspay/{charge_id}"}
 
