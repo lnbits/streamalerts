@@ -5,7 +5,7 @@
       <q-card-section class="q-pa-none">
         <h5 class="q-my-none">Donate Bitcoin to {{ twitchuser }}</h5>
         <br />
-        <q-form @submit="Invoice()" class="q-gutter-md">
+        <q-form @submit="submitInvoice()" class="q-gutter-md">
           <q-input
             filled
             dense
@@ -50,12 +50,10 @@
 
 {% endblock %} {% block scripts %}
 <script>
-  Vue.component(VueQrcode.name, VueQrcode)
-
-  new Vue({
+  window.app = Vue.createApp({
     el: '#vue',
     mixins: [windowMixin],
-    data: function () {
+    data() {
       return {
         paymentReq: null,
         redirectUrl: null,
@@ -76,19 +74,18 @@
     },
 
     methods: {
-      Invoice: function () {
-        var self = this
+      submitInvoice() {
         axios
           .post('/streamalerts/api/v1/donations', {
-            service: {{ service }},
-            name: self.donationDialog.data.name,
-            sats: self.donationDialog.data.sats,
-            message: self.donationDialog.data.message
+            service: '{{ service }}',
+            name: this.donationDialog.data.name,
+            sats: this.donationDialog.data.sats,
+            message: this.donationDialog.data.message
           })
-          .then(function (response) {
-            self.redirect_url = response.data.redirect_url
-            console.log(self.redirect_url)
-            window.location.href = self.redirect_url
+          .then(response => {
+            this.redirect_url = response.data.redirect_url
+            console.log(this.redirect_url)
+            window.location.href = this.redirect_url
           })
       }
     }

@@ -1,4 +1,3 @@
-from sqlite3 import Row
 from typing import Optional
 
 from fastapi import Query
@@ -17,8 +16,9 @@ class CreateService(BaseModel):
 class CreateDonation(BaseModel):
     name: str = Query("Anonymous")
     sats: int = Query(..., ge=1)
-    service: int = Query(...)
+    service: str = Query(...)
     message: str = Query("")
+    cur_code: str = Query("USD")
 
 
 class ValidateDonation(BaseModel):
@@ -37,12 +37,8 @@ class Donation(BaseModel):
     cur_code: str  # Three letter currency code accepted by Streamlabs
     sats: int
     amount: float  # The donation amount after fiat conversion
-    service: int  # The ID of the corresponding Service
-    posted: bool  # Whether the donation has already been posted to a Service
-
-    @classmethod
-    def from_row(cls, row: Row) -> "Donation":
-        return cls(**dict(row))
+    service: str  # The ID of the corresponding Service
+    posted: bool = False  # Whether the donation has already been posted to a Service
 
 
 class Service(BaseModel):
@@ -51,20 +47,16 @@ class Service(BaseModel):
     Currently, Streamlabs is the only supported Service.
     """
 
-    id: int
+    id: str
     state: str  # A random hash used during authentication
     twitchuser: str  # The Twitch streamer's username
     client_id: str  # Third party service Client ID
     client_secret: str  # Secret corresponding to the Client ID
     wallet: str
-    onchain: Optional[str]
     servicename: str  # Currently, this will just always be "Streamlabs"
-    authenticated: bool  # Whether a token (see below) has been acquired yet
-    token: Optional[str]  # The token with which to authenticate requests
-
-    @classmethod
-    def from_row(cls, row: Row) -> "Service":
-        return cls(**dict(row))
+    authenticated: bool = False  # Whether a token (see below) has been acquired yet
+    onchain: Optional[str] = None
+    token: Optional[str] = None  # The token with which to authenticate requests
 
 
 class ChargeStatus(BaseModel):
