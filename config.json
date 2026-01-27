@@ -1,11 +1,30 @@
 {
+  "id": "streamalerts",
+  "version": "1.0.0",
   "name": "Stream Alerts",
+  "repo": "https://github.com/lnbits/streamalerts",
   "short_description": "Bitcoin donations in stream alerts",
+  "description": "",
   "tile": "/streamalerts/static/image/streamalerts.png",
-  "contributors": ["Fittiboy", "dni"],
   "min_lnbits_version": "1.0.0",
+  "contributors": [
+    {
+      "name": "Fittiboy",
+      "uri": "https://github.com/Fittiboy",
+      "role": "developer"
+    },
+    {
+      "name": "dni",
+      "uri": "https://github.com/dni",
+      "role": "developer"
+    }
+  ],
   "images": [],
   "description_md": "https://raw.githubusercontent.com/lnbits/streamalerts/main/description.md",
   "terms_and_conditions_md": "https://raw.githubusercontent.com/lnbits/streamalerts/main/toc.md",
-  "license": "MIT"
+  "paid_features": "",
+  "license": "MIT",
+  "tags": ["Creators", "Streaming"],
+  "donate": "",
+  "hidden": false
 }
