@@ -10,7 +10,7 @@ class CreateService(BaseModel):
     client_secret: str = Query(...)
     wallet: str = Query(...)
     servicename: str = Query(...)
-    onchain: str = Query(None)
+    onchain: str | None = Query(None)
 
 
 class CreateDonation(BaseModel):

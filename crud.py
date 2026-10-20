@@ -26,7 +26,7 @@ async def create_donation(
         id=donation_id or urlsafe_short_hash(),
         amount=amount,
         wallet=wallet,
-        **data.dict(),
+        **data.model_dump(),
     )
     await db.insert("streamalerts.donations", donation)
     return donation
@@ -74,7 +74,7 @@ async def create_service(data: CreateService) -> Service:
     service = Service(
         id=urlsafe_short_hash(),
         state=urlsafe_short_hash(),
-        **data.dict(),
+        **data.model_dump(),
     )
     await db.insert("streamalerts.services", service)
     return service

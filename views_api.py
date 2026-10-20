@@ -204,7 +204,7 @@ async def api_update_donation(
             status_code=HTTPStatus.FORBIDDEN, detail="Not your donation."
         )
 
-    for k, v in data.dict().items():
+    for k, v in data.model_dump().items():
         setattr(donation, k, v)
     await update_donation(donation)
     return donation
@@ -229,7 +229,7 @@ async def api_update_service(
             status_code=HTTPStatus.FORBIDDEN, detail="Not your service."
         )
 
-    for k, v in data.dict().items():
+    for k, v in data.model_dump().items():
         setattr(service, k, v)
 
     service = await update_service(service)

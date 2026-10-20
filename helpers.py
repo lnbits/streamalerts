@@ -24,7 +24,7 @@ async def get_charge_status(charge_id: str, api_key: str) -> ChargeStatus:
             headers=headers,
         )
         r.raise_for_status()
-        return ChargeStatus.parse_obj(r.json())
+        return ChargeStatus.model_validate(r.json())
 
 
 async def delete_charge(charge_id: str, api_key: str):
