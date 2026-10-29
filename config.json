@@ -1,10 +1,10 @@
 {
   "name": "Stream Alerts",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "short_description": "Bitcoin donations in stream alerts",
   "tile": "/streamalerts/static/image/streamalerts.png",
   "contributors": ["Fittiboy", "dni"],
-  "min_lnbits_version": "1.7.0",
+  "min_lnbits_version": "1.7.0-rc1",
   "images": [],
   "description_md": "https://raw.githubusercontent.com/lnbits/streamalerts/main/description.md",
   "terms_and_conditions_md": "https://raw.githubusercontent.com/lnbits/streamalerts/main/toc.md",
