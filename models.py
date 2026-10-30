@@ -1,5 +1,3 @@
-from typing import Optional
-
 from fastapi import Query
 from pydantic import BaseModel
 
@@ -10,7 +8,7 @@ class CreateService(BaseModel):
     client_secret: str = Query(...)
     wallet: str = Query(...)
     servicename: str = Query(...)
-    onchain: str = Query(None)
+    onchain: str | None = Query(None)
 
 
 class CreateDonation(BaseModel):
@@ -55,8 +53,8 @@ class Service(BaseModel):
     wallet: str
     servicename: str  # Currently, this will just always be "Streamlabs"
     authenticated: bool = False  # Whether a token (see below) has been acquired yet
-    onchain: Optional[str] = None
-    token: Optional[str] = None  # The token with which to authenticate requests
+    onchain: str | None = None
+    token: str | None = None  # The token with which to authenticate requests
 
 
 class ChargeStatus(BaseModel):

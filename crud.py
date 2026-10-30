@@ -1,5 +1,3 @@
-from typing import Optional
-
 import httpx
 from lnbits.core.crud import get_wallet
 from lnbits.db import Database
@@ -19,14 +17,14 @@ async def get_service_redirect_uri(request, service_id):
 
 
 async def create_donation(
-    data: CreateDonation, wallet: str, amount: float, donation_id: Optional[str] = None
+    data: CreateDonation, wallet: str, amount: float, donation_id: str | None = None
 ) -> Donation:
     """Create a new Donation"""
     donation = Donation(
         id=donation_id or urlsafe_short_hash(),
         amount=amount,
         wallet=wallet,
-        **data.dict(),
+        **data.model_dump(),
     )
     await db.insert("streamalerts.donations", donation)
     return donation
@@ -74,15 +72,15 @@ async def create_service(data: CreateService) -> Service:
     service = Service(
         id=urlsafe_short_hash(),
         state=urlsafe_short_hash(),
-        **data.dict(),
+        **data.model_dump(),
     )
     await db.insert("streamalerts.services", service)
     return service
 
 
 async def get_service(
-    service_id: Optional[str] = None, by_state: Optional[str] = None
-) -> Optional[Service]:
+    service_id: str | None = None, by_state: str | None = None
+) -> Service | None:
     """Return a service either by ID or, available, by state
 
     Each Service's donation page is reached through its "state" hash
@@ -177,7 +175,7 @@ async def delete_service(service_id: str) -> list[str]:
     return donation_ids
 
 
-async def get_donation(donation_id: str) -> Optional[Donation]:
+async def get_donation(donation_id: str) -> Donation | None:
     """Return a Donation"""
     return await db.fetchone(
         "SELECT * FROM streamalerts.donations WHERE id = :id",
