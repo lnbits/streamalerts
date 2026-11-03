@@ -4,7 +4,7 @@
   <div class="col-12 col-md-8 col-lg-7 q-gutter-y-md">
     <q-card>
       <q-card-section>
-        <q-btn unelevated color="primary" @click="serviceDialog.show = true"
+        <q-btn unelevated color="primary" @click="openServiceDialog"
           >New Service</q-btn
         >
       </q-card-section>
@@ -76,6 +76,14 @@
                 v-text="col.value"
               ></q-td>
               <q-td auto-width>
+                <q-btn
+                  flat
+                  dense
+                  size="xs"
+                  icon="edit"
+                  aria-label="Edit onchain wallet"
+                  @click="updateserviceDialog(props.row.id)"
+                ></q-btn>
                 <q-btn
                   flat
                   dense
@@ -162,40 +170,63 @@
     <q-card class="q-pa-lg q-pt-xl lnbits__dialog-card">
       <q-form @submit="sendServiceData" class="q-gutter-md">
         <q-select
+          v-if="!serviceDialog.data.id"
           filled
           dense
           emit-value
+          map-options
           v-model="serviceDialog.data.wallet"
-          :options="g.user.walletOptions"
+          :options="lightningWalletOptions"
           label="Wallet *"
+          :rules="[val => !!val || 'Select a wallet']"
         >
         </q-select>
-        <div class="row">
-          <div class="col">
-            <div v-if="walletLinks.length > 0">
-              <q-checkbox v-model="serviceDialog.data.chain" label="Chain" />
-            </div>
-            <div v-else>
-              <q-checkbox :value="false" label="Chain" disabled>
-                <q-tooltip>
-                  Onchain Wallet (watch-only) extension MUST be activated and
-                  have a wallet
-                </q-tooltip>
-              </q-checkbox>
-            </div>
-          </div>
-        </div>
-        <div v-if="serviceDialog.data.chain">
+        <q-checkbox
+          v-model="serviceDialog.chain"
+          label="Accept onchain payments"
+          :disable="!serviceDialog.data.wallet"
+          @update:model-value="val => val && getWalletLinks()"
+        ></q-checkbox>
+        <div v-if="serviceDialog.chain">
           <q-select
             filled
             dense
             emit-value
+            map-options
             v-model="serviceDialog.data.onchain"
-            :options="walletLinks"
-            label="Chain Wallet"
-          />
+            :options="onchainWalletOptions"
+            label="Onchain Wallet"
+            hint="Receive through SatsPay using an LNbits or Watchonly wallet"
+          ></q-select>
+          <q-btn
+            v-if="!hasCoreOnchainWallet"
+            flat
+            dense
+            color="primary"
+            label="Create onchain wallet"
+            @click="createOnchainWallet"
+          ></q-btn>
+          <q-banner
+            v-if="selectedCoreWallet && selectedCoreWallet.status !== 'ready'"
+            dense
+            class="bg-orange-2 text-orange-9 q-mt-sm"
+          >
+            <div
+              v-text="selectedCoreWallet.status === 'setup'
+                ? 'Set up this onchain wallet before receiving.'
+                : 'Back up this onchain wallet before receiving.'"
+            ></div>
+            <q-btn
+              flat
+              dense
+              color="primary"
+              :label="selectedCoreWallet.status === 'setup' ? 'Set up wallet' : 'Back up wallet'"
+              @click="openOnchainWallet(selectedCoreWallet.id)"
+            ></q-btn>
+          </q-banner>
         </div>
         <q-input
+          v-if="!serviceDialog.data.id"
           filled
           dense
           v-model.trim="serviceDialog.data.twitchuser"
@@ -203,6 +234,7 @@
           label="Twitch Username *"
         ></q-input>
         <q-select
+          v-if="!serviceDialog.data.id"
           filled
           dense
           emit-value
@@ -212,6 +244,7 @@
           hint="The service you use for alerts. (Currently only Streamlabs)"
         ></q-select>
         <q-input
+          v-if="!serviceDialog.data.id"
           filled
           dense
           v-model.trim="serviceDialog.data.client_id"
@@ -219,6 +252,7 @@
           label="Client ID *"
         ></q-input>
         <q-input
+          v-if="!serviceDialog.data.id"
           filled
           dense
           v-model.trim="serviceDialog.data.client_secret"
@@ -227,21 +261,12 @@
         ></q-input>
         <div class="row q-mt-lg">
           <q-btn
-            v-if="serviceDialog.data.id"
             unelevated
             color="primary"
             type="submit"
-            >Update Service</q-btn
-          >
-
-          <q-btn
-            v-else
-            unelevated
-            color="primary"
-            :disable="serviceDialog.data.client_id == null || serviceDialog.data.client_secret == 0 || serviceDialog.data.twitchuser == null"
-            type="submit"
-            >Create Service</q-btn
-          >
+            :disable="!serviceDialog.data.wallet || !serviceDialog.data.client_id || !serviceDialog.data.client_secret || !serviceDialog.data.twitchuser || onchainSelectionInvalid"
+            :label="serviceDialog.data.id ? 'Update Service' : 'Create Service'"
+          ></q-btn>
           <q-btn v-close-popup flat color="grey" class="q-ml-auto"
             >Cancel</q-btn
           >

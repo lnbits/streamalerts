@@ -1,6 +1,7 @@
 from http import HTTPStatus
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+import httpx
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import RedirectResponse
 from lnbits.core.crud import get_user, get_wallet
 from lnbits.core.models import WalletTypeInfo
@@ -22,19 +23,24 @@ from .crud import (
     update_donation,
     update_service,
 )
-from .helpers import create_charge, delete_charge, get_charge_status
+from .helpers import (
+    create_charge,
+    delete_charge,
+    get_charge_status,
+    get_satspay_network,
+)
 from .models import CreateDonation, CreateService, Donation, Service, ValidateDonation
 
 streamalerts_api_router = APIRouter()
 
 
-@streamalerts_api_router.post(
-    "/api/v1/services", dependencies=[Depends(require_admin_key)]
-)
-async def api_create_service(data: CreateService) -> Service:
+@streamalerts_api_router.post("/api/v1/services")
+async def api_create_service(
+    data: CreateService, key_info: WalletTypeInfo = Depends(require_admin_key)
+) -> Service:
     """Create a service, which holds data about how/where to post donations"""
-    service = await create_service(data)
-    return service
+    await _validate_service_wallets(data, key_info.wallet.user)
+    return await create_service(data)
 
 
 @streamalerts_api_router.get("/api/v1/getaccess/{service_id}")
@@ -121,7 +127,22 @@ async def api_create_donation(data: CreateDonation, request: Request):
         "onchainwallet": service.onchain,
         "user": wallet.user,
     }
-    charge_id = await create_charge(data=create_charge_data, api_key=wallet.inkey)
+    try:
+        charge_id = await create_charge(data=create_charge_data, api_key=wallet.inkey)
+    except Exception as exc:
+        if (
+            isinstance(exc, httpx.HTTPStatusError)
+            and exc.response.status_code == HTTPStatus.BAD_REQUEST
+        ):
+            try:
+                detail = exc.response.json().get("detail")
+            except (ValueError, AttributeError):
+                detail = None
+            if isinstance(detail, str):
+                raise HTTPException(HTTPStatus.BAD_REQUEST, detail=detail) from exc
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_GATEWAY, detail="Unable to create payment."
+        ) from exc
     await create_donation(
         data=data,
         wallet=service.wallet,
@@ -131,11 +152,13 @@ async def api_create_donation(data: CreateDonation, request: Request):
     return {"redirect_url": f"/satspay/{charge_id}"}
 
 
+@streamalerts_api_router.get("/api/v1/postdonation")
 @streamalerts_api_router.post("/api/v1/postdonation")
-async def api_post_donation(data: ValidateDonation):
+async def api_post_donation(data: ValidateDonation, response: Response):
     """Post a paid donation to Stremalabs/StreamElements.
     This endpoint acts as a webhook for the SatsPayServer extension."""
 
+    response.headers["Cache-Control"] = "no-store"
     donation_id = data.id
     donation = await get_donation(donation_id)
     if not donation:
@@ -147,8 +170,13 @@ async def api_post_donation(data: ValidateDonation):
     assert wallet, f"Could not fetch wallet: {donation.wallet}"
 
     charge = await get_charge_status(donation_id, wallet.inkey)
-    if charge and charge.paid:
-        return await post_donation(donation_id)
+    if charge.id == donation.id and charge.paid:
+        try:
+            return await post_donation(donation_id)
+        except httpx.HTTPError as exc:
+            raise HTTPException(
+                HTTPStatus.BAD_GATEWAY, detail="Unable to deliver the stream alert."
+            ) from exc
     else:
         raise HTTPException(
             status_code=HTTPStatus.BAD_REQUEST, detail="Not a paid charge!"
@@ -229,6 +257,7 @@ async def api_update_service(
             status_code=HTTPStatus.FORBIDDEN, detail="Not your service."
         )
 
+    await _validate_service_wallets(data, key_info.wallet.user, service.onchain)
     for k, v in data.model_dump().items():
         setattr(service, k, v)
 
@@ -274,3 +303,30 @@ async def api_delete_service(
     donations = await delete_service(service_id)
     for d in donations:
         await delete_charge(d, key_info.wallet.adminkey)
+
+
+async def _validate_service_wallets(
+    data: CreateService, owner_id: str, saved_onchain: str | None = None
+) -> None:
+    user = await get_user(owner_id)
+    if not user or data.wallet not in user.wallet_ids:
+        raise HTTPException(HTTPStatus.FORBIDDEN, detail="Not your wallet.")
+    if not data.onchain or data.onchain == saved_onchain:
+        return
+    if not data.onchain.startswith("core:"):
+        return
+    wallet = user.get_wallet(data.onchain.removeprefix("core:"))
+    if not wallet or not wallet.is_onchain_wallet:
+        raise HTTPException(HTTPStatus.FORBIDDEN, detail="Not your onchain wallet.")
+
+    try:
+        network = await get_satspay_network()
+    except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
+        raise HTTPException(
+            HTTPStatus.BAD_GATEWAY, detail="Unable to load the SatsPay network."
+        ) from exc
+    if (wallet.onchain_network or "Mainnet") != network:
+        raise HTTPException(
+            HTTPStatus.BAD_REQUEST,
+            detail=f"Select an onchain wallet on the SatsPay network ({network}).",
+        )

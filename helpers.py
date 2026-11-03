@@ -4,6 +4,15 @@ from lnbits.settings import settings
 from .models import ChargeStatus
 
 
+async def get_satspay_network() -> str:
+    async with httpx.AsyncClient() as client:
+        response = await client.get(
+            f"http://{settings.host}:{settings.port}/satspay/api/v1/settings/public"
+        )
+        response.raise_for_status()
+        return response.json()["network"]
+
+
 async def create_charge(data: dict, api_key: str) -> str:
     async with httpx.AsyncClient() as client:
         headers = {"X-API-KEY": api_key}
