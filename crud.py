@@ -60,11 +60,13 @@ async def post_donation(donation_id: str) -> dict:
         return {"message": "StreamElements not yet supported!"}
     else:
         return {"message": "Unsopported servicename"}
+    response.raise_for_status()
+    result = response.json()
     await db.execute(
         "UPDATE streamalerts.donations SET posted = :posted WHERE id = :id",
         {"id": donation_id, "posted": True},
     )
-    return response.json()
+    return result
 
 
 async def create_service(data: CreateService) -> Service:

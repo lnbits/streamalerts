@@ -56,7 +56,6 @@
     data() {
       return {
         paymentReq: null,
-        redirectUrl: null,
         donationDialog: {
           show: false,
           data: {
@@ -74,19 +73,23 @@
     },
 
     methods: {
-      submitInvoice() {
-        axios
-          .post('/streamalerts/api/v1/donations', {
-            service: '{{ service }}',
-            name: this.donationDialog.data.name,
-            sats: this.donationDialog.data.sats,
-            message: this.donationDialog.data.message
-          })
-          .then(response => {
-            this.redirect_url = response.data.redirect_url
-            console.log(this.redirect_url)
-            window.location.href = this.redirect_url
-          })
+      async submitInvoice() {
+        try {
+          const {data} = await LNbits.api.request(
+            'POST',
+            '/streamalerts/api/v1/donations',
+            null,
+            {
+              service: '{{ service }}',
+              name: this.donationDialog.data.name || 'Anonymous',
+              sats: this.donationDialog.data.sats,
+              message: this.donationDialog.data.message
+            }
+          )
+          window.location.href = data.redirect_url
+        } catch (error) {
+          LNbits.utils.notifyApiError(error)
+        }
       }
     }
   })

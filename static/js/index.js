@@ -16,6 +16,8 @@ window.app = Vue.createApp({
       services: [],
       donations: [],
       walletLinks: [],
+      coreOnchainWallets: [],
+      loadingOnchainWallets: false,
       servicesTable: {
         columns: [
           {
@@ -39,7 +41,7 @@ window.app = Vue.createApp({
           {
             name: 'onchain address',
             align: 'left',
-            label: 'Onchain Address',
+            label: 'Onchain Wallet',
             field: 'onchain'
           },
           {
@@ -106,21 +108,116 @@ window.app = Vue.createApp({
       }
     }
   },
+  computed: {
+    editingService() {
+      return this.services.find(
+        service => service.id === this.serviceDialog.data.id
+      )
+    },
+    lightningWalletOptions() {
+      const walletIds = this.g.user.wallets
+        .filter(wallet => wallet.canReceivePayments)
+        .map(wallet => wallet.id)
+      return this.g.user.walletOptions.filter(wallet =>
+        walletIds.includes(wallet.value)
+      )
+    },
+    onchainWalletOptions() {
+      const core = this.coreOnchainWallets.map(wallet => ({
+        label: `LNbits: ${wallet.name}${wallet.status === 'ready' ? '' : ' (Not ready)'}`,
+        value: `core:${wallet.id}`
+      }))
+      const watchonly = this.walletLinks.map(wallet => ({
+        label: `Watchonly: ${wallet.title || wallet.id}`,
+        value: wallet.id
+      }))
+      return [...core, ...watchonly]
+    },
+    selectedCoreWallet() {
+      const reference = this.serviceDialog.data.onchain
+      if (!reference?.startsWith('core:')) return null
+      return (
+        this.coreOnchainWallets.find(w => w.id === reference.slice(5)) || null
+      )
+    },
+    hasCoreOnchainWallet() {
+      return this.g.user.wallets.some(wallet => wallet.walletType === 'onchain')
+    },
+    onchainSelectionInvalid() {
+      if (!this.serviceDialog.chain) return false
+      const reference = this.serviceDialog.data.onchain
+      if (reference && reference === this.editingService?.onchain) return false
+      return (
+        !this.onchainWalletOptions.some(option => option.value === reference) ||
+        (reference?.startsWith('core:') &&
+          this.selectedCoreWallet?.status !== 'ready')
+      )
+    }
+  },
   methods: {
-    getWalletLinks() {
-      LNbits.api
-        .request(
+    async getWalletLinks() {
+      if (this.loadingOnchainWallets) return
+      this.loadingOnchainWallets = true
+      this.walletLinks = []
+      this.coreOnchainWallets = []
+      const inkey = this.g.user.wallets[0].inkey
+      try {
+        const {
+          data: {network}
+        } = await LNbits.api.request('GET', '/satspay/api/v1/settings/public')
+        const core = LNbits.api
+          .request('GET', '/satspay/api/v1/onchain-wallets', inkey)
+          .then(({data}) => {
+            this.coreOnchainWallets = data.filter(
+              wallet => wallet.network === network
+            )
+          })
+          .catch(LNbits.utils.notifyApiError)
+        if (this.g.user.extensions.includes('watchonly')) {
+          await Promise.all([core, this.getWatchonlyWallets(network, inkey)])
+        } else {
+          await core
+        }
+      } catch (error) {
+        LNbits.utils.notifyApiError(error)
+      } finally {
+        this.loadingOnchainWallets = false
+      }
+    },
+    async getWatchonlyWallets(network, inkey) {
+      try {
+        const {data: config} = await LNbits.api.request(
           'GET',
-          '/watchonly/api/v1/wallet',
-          this.g.user.wallets[0].inkey
+          '/watchonly/api/v1/config',
+          inkey
         )
-        .then(response => {
-          for (i = 0; i < response.data.length; i++) {
-            this.walletLinks.push(response.data[i].id)
-          }
+        if (config.network !== network) {
+          this.$q.notify({
+            type: 'warning',
+            message: `Watchonly must use the SatsPay network (${network}).`
+          })
           return
-        })
-        .catch(LNbits.utils.notifyApiError)
+        }
+        const {data} = await LNbits.api.request(
+          'GET',
+          `/watchonly/api/v1/wallet?network=${encodeURIComponent(network)}`,
+          inkey
+        )
+        this.walletLinks = data
+      } catch (error) {
+        LNbits.utils.notifyApiError(error)
+      }
+    },
+    createOnchainWallet() {
+      this.g.newWalletType = 'onchain'
+    },
+    openOnchainWallet(walletId) {
+      this.$router.push({path: '/wallet', query: {wal: walletId}})
+    },
+    openServiceDialog() {
+      this.serviceDialog.data = {}
+      this.serviceDialog.chain = false
+      this.serviceDialog.show = true
     },
     getDonations() {
       LNbits.api
@@ -173,33 +270,59 @@ window.app = Vue.createApp({
         })
     },
     sendServiceData() {
-      const wallet = _.findWhere(this.g.user.wallets, {
-        id: this.serviceDialog.data.wallet
-      })
-      const data = this.serviceDialog.data
-
-      this.createService(wallet, data)
-    },
-
-    createService(wallet, data) {
-      LNbits.api
-        .request('POST', '/streamalerts/api/v1/services', wallet.adminkey, data)
+      if (this.onchainSelectionInvalid) return
+      const data = {
+        ...this.serviceDialog.data,
+        onchain: this.serviceDialog.chain
+          ? this.serviceDialog.data.onchain
+          : null
+      }
+      const wallet = this.g.user.wallets.find(
+        wallet => wallet.id === data.wallet
+      )
+      return LNbits.api
+        .request(
+          data.id ? 'PUT' : 'POST',
+          '/streamalerts/api/v1/services' + (data.id ? `/${data.id}` : ''),
+          wallet.adminkey,
+          data
+        )
         .then(response => {
-          this.services.push(mapStreamAlerts(response.data))
+          const service = mapStreamAlerts(response.data)
+          if (data.id) {
+            this.services = this.services.map(row =>
+              row.id === data.id ? service : row
+            )
+          } else {
+            this.services.push(service)
+          }
           this.serviceDialog.show = false
           this.serviceDialog.data = {}
         })
         .catch(LNbits.utils.notifyApiError)
     },
     updateserviceDialog(serviceId) {
-      const link = _.findWhere(this.services, {id: serviceId})
-      this.serviceDialog.data.id = link.id
-      this.serviceDialog.data.wallet = link.wallet
-      this.serviceDialog.data.twitchuser = link.twitchuser
-      this.serviceDialog.data.servicename = link.servicename
-      this.serviceDialog.data.client_id = link.client_id
-      this.serviceDialog.data.client_secret = link.client_secret
+      const {
+        id,
+        wallet,
+        twitchuser,
+        servicename,
+        client_id,
+        client_secret,
+        onchain
+      } = this.services.find(service => service.id === serviceId)
+      this.serviceDialog.data = {
+        id,
+        wallet,
+        twitchuser,
+        servicename,
+        client_id,
+        client_secret,
+        onchain
+      }
+      this.serviceDialog.chain = Boolean(onchain)
       this.serviceDialog.show = true
+      if (this.serviceDialog.chain) this.getWalletLinks()
     },
     deleteService(servicesId) {
       const services = _.findWhere(this.services, {id: servicesId})
@@ -228,7 +351,6 @@ window.app = Vue.createApp({
 
   created() {
     if (this.g.user.wallets.length) {
-      this.getWalletLinks()
       this.getDonations()
       this.getServices()
     }
